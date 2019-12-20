@@ -4,6 +4,31 @@
 #include <termios.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+
+#define BUFFER_SIZE	1024
+int fcom = -1; 
+char strLcmPath[30];
+
+u_int8_t *pWritePtr, *pReadPtr;
+u_int8_t *pRxBufferStart, *pRxBufferEnd;
+u_int16_t wRxCounter;
+u_int32_t dwBaudrate =0 ;
+struct termios old_tios;
+
+pthread_t InQueueID;
+pthread_t CheckingThread;
+pthread_mutex_t buf_mut;
+pthread_mutex_t port_mut;
+u_int8_t	RxBuffer[BUFFER_SIZE];
+
+/*****************/
+//void* _IncomeInQueueThread(void* object);
+//int32_t _OpenLcmPort(char* pLsmPath);
+//void _CloseLcmPort(void);
+//int32_t _SendBufferLength(u_int8_t* buffer, int32_t length);
+//int _ReadBufferLength(u_int8_t* buffer, int32_t length);
+//void _search_LCM_port(void);
 
 
 int set_interface_attribs (int fd, int speed, int parity)
@@ -45,52 +70,57 @@ int set_interface_attribs (int fd, int speed, int parity)
         return 0;
 }
 /**********************************************/
+
 void* _IncomeInQueueThread(void* object)
 {
 unsigned char tmpBuffer[512];
-int xi;
-uint8_t xch;
+int xi,n;
+u_int8_t xch;
 
 	while(1)
 	{
-		int n=read(fcom, tmpBuffer, 512);
+		n=read(fcom, tmpBuffer, 512);
 		if ( n > 0 && n < 512 ) {
+//printf("receive n=%d, ", n);
 			for ( xi=0 ; xi<n ; xi++) {
 					xch = tmpBuffer[xi];
+//printf("0x%02X ", xch);
 					pthread_mutex_lock(&buf_mut);					
 					*pWritePtr = xch;
 					wRxCounter++;
-					if ( pWritePtr == pSASRxBufferEnd ) pWritePtr = pSASRxBufferStart;
+					if ( pWritePtr == pRxBufferEnd ) pWritePtr = pRxBufferStart;
 					else				    pWritePtr++;
 					pthread_mutex_unlock(&buf_mut);
-							
 			}
+//printf("\n");
 		}
-		else {
-			usleep(5000);	//5ms
+		else{
+			usleep(5000);
 		}
 	}
 	return NULL;
 }
 /******************************************/
-int32_t _SendBufferLength(uint8_t* buffer, int32_t length)
-{
-uint8_t *bptr;
 
-	if ( !fcom ) return 0;
+int _SendBufferLength(u_int8_t* buffer, int32_t length)
+{
+u_int8_t *bptr;
+	//_ReadBuffer_clear();
+	//if ( !fIgnOpened ) return 0;
 	if ( length < 1 ) return 0;
 	bptr = buffer;
+//printf("send CMD=%s\n", bptr);
 	write(fcom, bptr, length);
 	tcdrain(fcom);
 	return 1;
 }
 /**************/
-int _ReadBufferLength(uint8_t* buffer, int32_t length)
+int _ReadBufferLength(u_int8_t* buffer, int32_t length)
 {
 int32_t iResult = 0;
 int32_t fEnding =0;
 int waitCnt, rxCnt;
-uint8_t *bptr, xch;
+u_int8_t *bptr, xch;
 
 	if ( !fcom ) return iResult;
 	if ( length < 1 ) return iResult;
@@ -112,7 +142,7 @@ uint8_t *bptr, xch;
 			xch = *pReadPtr;
 			*bptr++ = xch;
 			wRxCounter--;
-			if ( pReadPtr == pSASRxBufferEnd) pReadPtr = pSASRxBufferStart;
+			if ( pReadPtr == pRxBufferEnd) pReadPtr = pRxBufferStart;
 			else				  pReadPtr++;
 			pthread_mutex_unlock(&buf_mut);
 			rxCnt++;
@@ -125,96 +155,101 @@ uint8_t *bptr, xch;
 
 	return iResult;
 }
+/**************************************************
+int _ReadBuffer_LF(int8_t* buffer)
+{
+int iResult = 0;
+int fEnding =0;
+int waitCnt, rxCnt;
+int8_t *bptr, xch;
+
+	//if ( !fIgnOpened_p2 ) return iResult;
+	rxCnt=0;
+	waitCnt = 0;
+	bptr = buffer;
+	
+	while (!fEnding)
+	{
+		if ( wIgnRxCounter == 0 ) 
+		{
+			_ign_msdelay(4); //4ms
+			waitCnt++;
+			if ( waitCnt >= 25 )  fEnding = 1;
+		}
+		else {
+			waitCnt = 0;
+			pthread_mutex_lock(&buf_mut);
+			xch = *pIgnReadPtr;
+			if ( xch != 0x0d && xch != 0x0a  && xch != 0x00 ) {
+				//maybe ignore all CTRL code 
+				*bptr++ = xch;
+				rxCnt++;
+			}
+			wIgnRxCounter_p2--;
+			if ( pIgnReadPtr_p2 == pIgnRxBufferEnd_p2) pIgnReadPtr_p2 = pIgnRxBufferStart_p2;
+			else				  pIgnReadPtr_p2++;
+			pthread_mutex_unlock(&ign_buf_mut_p2);
+			
+			if ( xch == 0x0a || rxCnt >= MAX_STR_LENGTH )  {
+				*bptr = 0x00;
+				iResult =1;
+				fEnding = 1;
+			}
+			
+		}
+	}
+
+	return iResult;
+}*/
+/**************/
+
 //************************************************************/
 /*****************************/
-/**** Close LCM Port     *****/
+/**** Close COM Port     *****/
 /*****************************/
-void _CloseLcmPort(void)
+void _ClosePort(void)
 {
-	pthread_cancel(SASInQueueID);	
+	pthread_cancel(InQueueID);	
 	pthread_mutex_destroy(&buf_mut);
 	pthread_mutex_destroy(&port_mut);
 	tcsetattr(fcom, TCSANOW, &old_tios);	//restore setting
 	close(fcom);
 	dwBaudrate = 0;
-	fcom=-1;
 	fcom = 0;
 }
 /*****************************/
-/**** Open LCM Port      *****/
+/**** Open COM Port      *****/
 /*****************************/
-int32_t _OpenLcmPort(char* pLcmPath)
+int32_t _OpenPort(char* pComPath)
 {
 int iResult = 0;
-uint32_t baudrate[]={B115200, B57600, B38400, B19200, B9600 };
-uint32_t brValue[] ={ 115200,  57600,  38400,  19200,  9600 };
-uint8_t wrCmd[3] = {0xFE, 0x30, 0xFD };
-uint8_t rdData[10];
-uint32_t xi;
+
+u_int8_t rdData[10];
+u_int32_t xi;
 int32_t iret;
 
-	fcom = open(pLcmPath, O_RDWR | O_NOCTTY | O_NDELAY);
+	fcom = open(pComPath, O_RDWR | O_NOCTTY | O_NDELAY);
 	if (fcom < 0) return 0;
 	tcgetattr(fcom, &old_tios);		//backup setting
 
 	//Buffer pointer initial
 	wRxCounter =0 ;	
-	pWritePtr = &SASRxBuffer[0];
-	pReadPtr = &SASRxBuffer[0];
-	pSASRxBufferStart = &SASRxBuffer[0];
-	pSASRxBufferEnd = &SASRxBuffer[BUFFER_SIZE-1];
+	pWritePtr = &RxBuffer[0];
+	pReadPtr = &RxBuffer[0];
+	pRxBufferStart = &RxBuffer[0];
+	pRxBufferEnd = &RxBuffer[BUFFER_SIZE-1];
 	//hook receiver thread
 	fcom=1;
 	pthread_mutex_init(&port_mut, NULL);
 	pthread_mutex_init(&buf_mut, NULL);
-	pthread_create(&SASInQueueID, (pthread_attr_t*)(0), _IncomeInQueueThread, (void*)(0));
+	pthread_create(&InQueueID, (pthread_attr_t*)(0), _IncomeInQueueThread, (void*)(0));
  
-	if ( dwBaudrate == 0 ) { //search 
-		for (xi=0 ; xi<(sizeof(baudrate)/4) ; xi++ ) {
-			//open LCM Communciaction port 
-			set_interface_attribs(fcom, baudrate[xi], 0); //baudrate 2400 ~ 115200, parity none
-			//write Read Model Number command "FE 30 FD"	
-			wrCmd[1] = 0x30;
-			write(fcom, wrCmd, 3);
-			// read model number 2bytes
-			iret = _ReadBufferLength(rdData, 2);
-			if ( iret ) {
-				dwBaudrate = brValue[xi];
-				wrCmd[1] = 0x58;
-				write(fcom, wrCmd, 3); //clear, because serch will effect LCD screen display
-				xi = 1000;
-				iResult = 1;	
-			}
-		}
-	}
-	else {
-		switch (dwBaudrate) {
-		case 57600:
-			xi=1;
-			break;
-		case 38400:
-			xi=2;
-			break;
-		case 19200:
-			xi=3;
-			break;
-		case 9600:
-			xi=4;
-			break;
-		case 115200:
-		default:
-			xi=0;
-			break;
-
-		}
-		set_interface_attribs(fcom, baudrate[xi], 0); 
+	set_interface_attribs(fcom, B115200, 0); 
 		//not checking device when assign baudrate
-		//wrCmd[1] = 0x30;
-		//write(fcom, wrCmd, 3);
 		//iret = _ReadBufferLength(rdData, 2);
 		//if ( rdData[0]==0x10 && rdData[1]==0x02 )iResult = 1;
-		iResult = 1;
-	}
+	iResult = 1;
+	
 	
 	return iResult;
 }
@@ -222,67 +257,68 @@ int32_t iret;
 /***************************************************************/
 int main(int argc, char **argv) 
 {
+int iResult = 0;
+	//int fcom=0;
+char *wrCmd = "I";
+	char *com_path = "/dev/ttyUSB0";
 
-	int fcom=0;
-	char *com_path="/dev/ttyS1";
-	fcom = open(com_path,O_RDWR|O_NOCTTY|O_SYNC);
-	if(fcom==1)
+u_int8_t rdData[10];
+
+	if(argc<2)
+	{
+		printf("./AD411_util -continue\n");
+		printf("./AD411_util -single\n");
+		printf("./AD411_util -identify\n");
+		printf("./AD411_util -single\n");
+		printf("./AD411_util -gain\n");
+		printf("./AD411_util -offset\n");
+		printf("./AD411_util -save\n");
+
+return 0;
+	}
+
+	if(strcmp("-continue",argv[1])==0)
+	{printf("1\n");}
+	else if(strcmp("-single",argv[1])==0)
+	{printf("2\n");}
+	else if(strcmp("-identify",argv[1])==0)
+	{
+		printf("3\n");
+		//wrCmd[1] =;
+		write(fcom, wrCmd,1);
+		iResult = _ReadBufferLength(rdData, 2);
+			if ( iResult ) {
+					printf("receive data");
+				}
+
+
+	}
+	else if(strcmp("-gain",argv[1])==0)
+	{printf("4\n");}
+	else if(strcmp("-offset",argv[1])==0)
+	{printf("5\n");}
+	else if(strcmp("-save",argv[1])==0)
+	{printf("6\n");}
+	else
+	{printf("7\n");}
+
+	iResult = _OpenPort(com_path);
+	if(iResult == 1)
 	{
 		
 			
-	//Buffer pointer initial
-	wRxCounter =0 ;	
-	pWritePtr = &SASRxBuffer[0];
-	pReadPtr = &SASRxBuffer[0];
-	pSASRxBufferStart = &SASRxBuffer[0];
-	pSASRxBufferEnd = &SASRxBuffer[BUFFER_SIZE-1];
-	//hook receiver thread
 
-	pthread_mutex_init(&port_mut, NULL);
-	pthread_mutex_init(&buf_mut, NULL);
-	pthread_create(&SASInQueueID, (pthread_attr_t*)(0), _IncomeInQueueThread, (void*)(0));
- 
-	set_interface_attribs(fcom,B115200,0);//set baud rate 115200
 
 	
 	
 	}
 	else
 	{	
-		printf("fail to open : %s\n",*com_path);
+		printf("fail to open : %s\n",com_path);
 	}
 
 
-	if(argc<2)
-	{
-		printf("./AD411_util -continue");
-		printf("./AD411_util -single");
-		printf("./AD411_util -identify");
-		printf("./AD411_util -single");
-		printf("./AD411_util -gain");
-		printf("./AD411_util -offset");
-		printf("./AD411_util -save");
-	}
-	if(strcmp(argv[1],"-continue"))
-	{}
-	else if(strcmp(argv[1],"-continue"))
-	{}
-	else if(strcmp(argv[1],"-continue"))
-	{}
-	else if(strcmp(argv[1],"-continue"))
-	{}
-	else if(strcmp(argv[1],"-continue"))
-	{}
-	else if(strcmp(argv[1],"-continue"))
-	{}
-	else if(strcmp(argv[1],"-continue"))
-	{}
-	else if(strcmp(argv[1],"-continue"))
-	{}
-	else
-	{}
-
-
+return 0;
 
 
 }
