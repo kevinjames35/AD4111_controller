@@ -73,33 +73,65 @@ int set_interface_attribs (int fd, int speed, int parity)
 
 void* _IncomeInQueueThread(void* object)
 {
-unsigned char tmpBuffer[512];
+unsigned char tmpBuffer[32];
 int xi,n;
 u_int8_t xch;
-
+//printf("incoming queue\n");
 	while(1)
 	{
-		n=read(fcom, tmpBuffer, 512);
-		if ( n > 0 && n < 512 ) {
-//printf("receive n=%d, ", n);
+printf("XXX n=, \n");
+		n=read(fcom, tmpBuffer, 32);
+printf("receive n=%d, \n", n);
+fflush(stdout);
+		if ( n > 0 && n < 32 ) {
+//printf("receive n=%d, \n", n);
 			for ( xi=0 ; xi<n ; xi++) {
 					xch = tmpBuffer[xi];
-//printf("0x%02X ", xch);
-					pthread_mutex_lock(&buf_mut);					
+printf("Rev. 0x%02X \n", xch);
+					pthread_mutex_lock(&buf_mut);	
+//printf("-%s-\n",xch);				
 					*pWritePtr = xch;
 					wRxCounter++;
 					if ( pWritePtr == pRxBufferEnd ) pWritePtr = pRxBufferStart;
 					else				    pWritePtr++;
 					pthread_mutex_unlock(&buf_mut);
 			}
-//printf("\n");
+printf("\n");
 		}
-		else{
-			usleep(5000);
+//		else{
+//			usleep(5000);
+//		}
+	}
+	return NULL;
+}
+/*
+void* _IncomeInQueueThread(void* object)
+{
+unsigned char tmpBuffer[512];
+int xi;
+uint8_t xch;
+
+	while(1)
+	{
+		int n=read(fcom, tmpBuffer, 512);
+		if ( n > 0 && n < 512 ) {
+			pthread_mutex_lock(&buf_mut);
+			for ( xi=0 ; xi<n ; xi++) {
+					xch = tmpBuffer[xi];
+	
+							
+			}
+			pthread_mutex_unlock(&buf_mut);
+		}
+		else {
+			//printf("sleep\n");
+			usleep(5000);	//delay 1ms
+			
 		}
 	}
 	return NULL;
 }
+*/
 /******************************************/
 
 int _SendBufferLength(u_int8_t* buffer, int32_t length)
@@ -155,6 +187,9 @@ u_int8_t *bptr, xch;
 
 	return iResult;
 }
+
+
+
 /**************************************************
 int _ReadBuffer_LF(int8_t* buffer)
 {
@@ -228,10 +263,11 @@ u_int8_t rdData[10];
 u_int32_t xi;
 int32_t iret;
 
-	fcom = open(pComPath, O_RDWR | O_NOCTTY | O_NDELAY);
+	//fcom = open("/dev/ttyUSB0", O_RDWR | O_NDELAY);
+fcom = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY | O_NDELAY);
 	if (fcom < 0) return 0;
 	tcgetattr(fcom, &old_tios);		//backup setting
-
+//printf("open pass");
 	//Buffer pointer initial
 	wRxCounter =0 ;	
 	pWritePtr = &RxBuffer[0];
@@ -242,9 +278,9 @@ int32_t iret;
 	fcom=1;
 	pthread_mutex_init(&port_mut, NULL);
 	pthread_mutex_init(&buf_mut, NULL);
-	pthread_create(&InQueueID, (pthread_attr_t*)(0), _IncomeInQueueThread, (void*)(0));
+	//pthread_create(&InQueueID, (pthread_attr_t*)(0), _IncomeInQueueThread, (void*)(0));
  
-	set_interface_attribs(fcom, B115200, 0); 
+//	set_interface_attribs(fcom, B115200, 0); 
 		//not checking device when assign baudrate
 		//iret = _ReadBufferLength(rdData, 2);
 		//if ( rdData[0]==0x10 && rdData[1]==0x02 )iResult = 1;
@@ -262,7 +298,8 @@ int iResult = 0;
 char *wrCmd = "I";
 	char *com_path = "/dev/ttyUSB0";
 
-u_int8_t rdData[10];
+char rdData[100];
+int rcvCnt=0;
 
 	if(argc<2)
 	{
@@ -284,14 +321,29 @@ return 0;
 	else if(strcmp("-identify",argv[1])==0)
 	{
 		printf("3\n");
-		//wrCmd[1] =;
-		write(fcom, wrCmd,1);
-		iResult = _ReadBufferLength(rdData, 2);
-			if ( iResult ) {
-					printf("receive data");
-				}
+		iResult = _OpenPort(com_path);
+		sleep(2);
+		if(iResult == 1)
+		{
+		printf("open done\n");
+			iResult = _SendBufferLength(wrCmd,1);
+printf("Wait <enter>\n");
+rcvCnt = read(fcom, rdData, 100);
+printf("rcvCnt = %d",rcvCnt);
+getchar();
+			if(iResult == 1)
+			{printf("send success\n");
 
-
+				//iResult = _ReadBufferLength(rdData, 20000);
+				//if ( iResult ) {
+				//		printf("receive data");
+				//}	
+			}
+		}
+		else
+		{	
+			printf("fail to open : %s\n",com_path);
+		}		//wrCmd[1] =;
 	}
 	else if(strcmp("-gain",argv[1])==0)
 	{printf("4\n");}
@@ -302,20 +354,7 @@ return 0;
 	else
 	{printf("7\n");}
 
-	iResult = _OpenPort(com_path);
-	if(iResult == 1)
-	{
-		
-			
 
-
-	
-	
-	}
-	else
-	{	
-		printf("fail to open : %s\n",com_path);
-	}
 
 
 return 0;
