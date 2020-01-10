@@ -5,22 +5,26 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <errno.h>
+
+
+
 
 #define BUFFER_SIZE	1024
 int fcom = -1; 
-char strLcmPath[30];
+
 
 u_int8_t *pWritePtr, *pReadPtr;
 u_int8_t *pRxBufferStart, *pRxBufferEnd;
 u_int16_t wRxCounter;
 u_int32_t dwBaudrate =0 ;
-struct termios old_tios;
+struct termios old_tios,SerialPortSettings;
 
 pthread_t InQueueID;
 pthread_t CheckingThread;
 pthread_mutex_t buf_mut;
 pthread_mutex_t port_mut;
-u_int8_t	RxBuffer[BUFFER_SIZE];
+u_int8_t RxBuffer[BUFFER_SIZE];
 
 /*****************/
 //void* _IncomeInQueueThread(void* object);
@@ -33,38 +37,54 @@ u_int8_t	RxBuffer[BUFFER_SIZE];
 
 int set_interface_attribs (int fd, int speed, int parity)
 {
-        struct termios tty;
-        memset (&tty, 0, sizeof tty);
-        if (tcgetattr (fd, &tty) != 0)
-        {
+       // struct termios SerialPortSettings;
+        //memset (&SerialPortSettings, 0, sizeof SerialPortSettings);
+      //  if (tcgetattr (fd, &SerialPortSettings) != 0)
+       // {
                 //printf("error %d from tcgetattr", errno);
-                return -1;
-        }
+       //         return -1;
+       // }
 
-        cfsetospeed (&tty, speed);
-        cfsetispeed (&tty, speed);
+        cfsetospeed (&SerialPortSettings, speed);
+        cfsetispeed (&SerialPortSettings, speed);
+		/* 8N1 Mode */
+		SerialPortSettings.c_cflag &= ~PARENB;   /* Disables the Parity Enable bit(PARENB),So No Parity   */
+		SerialPortSettings.c_cflag &= ~CSTOPB;   /* CSTOPB = 2 Stop bits,here it is cleared so 1 Stop bit */
+		SerialPortSettings.c_cflag &= ~CSIZE;	 /* Clears the mask for setting the data size             */
+		SerialPortSettings.c_cflag |=  CS8;      /* Set the data bits = 8                                 */
+		
+		SerialPortSettings.c_cflag &= ~CRTSCTS;       /* No Hardware flow Control                         */
+		SerialPortSettings.c_cflag |= CREAD | CLOCAL; /* Enable receiver,Ignore Modem Control lines       */ 
+		
+		
+		SerialPortSettings.c_iflag &= ~(IXON | IXOFF | IXANY);          /* Disable XON/XOFF flow control both i/p and o/p */
+		SerialPortSettings.c_iflag &= ~(ICANON | ECHO | ECHOE | ISIG);  /* Non Cannonical mode                            */
 
-        tty.c_cflag = (tty.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
+		SerialPortSettings.c_oflag &= ~OPOST;/*No Output Processing*/
+       /* SerialPortSettings.c_cflag = (SerialPortSettings.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
         // disable IGNBRK for mismatched speed tests; otherwise receive break
         // as \000 chars
-        tty.c_iflag &= ~IGNBRK;         // disable break processing
-        tty.c_lflag = 0;                // no signaling chars, no echo,
+        //SerialPortSettings.c_iflag &= ~IGNBRK;         // disable break processing
+        //SerialPortSettings.c_lflag = 0;                // no signaling chars, no echo,
                                         // no canonical processing
-        tty.c_oflag = 0;                // no remapping, no delays
-        tty.c_cc[VMIN]  = 0;            // read doesn't block
-        tty.c_cc[VTIME] = 0;            // 0.5 seconds read timeout
+        SerialPortSettings.c_oflag = 0;                // no remapping, no delays
+        SerialPortSettings.c_cc[VMIN]  = 0;            // read doesn't block
+        SerialPortSettings.c_cc[VTIME] = 0;            // 0.5 seconds read timeout
 
-        tty.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
-        tty.c_cflag |= (CLOCAL | CREAD);	// ignore modem controls,
+        SerialPortSettings.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
+        SerialPortSettings.c_cflag |= (CLOCAL | CREAD);	// ignore modem controls,
                                         	// enable reading
-        tty.c_cflag &= ~(PARENB | PARODD);      // shut off parity
-        tty.c_cflag |= parity;
-        tty.c_cflag &= ~CSTOPB;
-        tty.c_cflag &= ~CRTSCTS;
-
-        if (tcsetattr (fd, TCSANOW, &tty) != 0)
+        SerialPortSettings.c_cflag &= ~(PARENB | PARODD);      // shut off parity
+        SerialPortSettings.c_cflag |= parity;
+        SerialPortSettings.c_cflag &= ~CSTOPB;
+        SerialPortSettings.c_cflag &= ~CRTSCTS;*/
+printf("c flag = %X\n",SerialPortSettings.c_cflag);
+printf("i flag = %X\n",SerialPortSettings.c_iflag);
+printf("o flag = %X\n",SerialPortSettings.c_oflag);
+printf("l flag = %X\n",SerialPortSettings.c_lflag);
+        if (tcsetattr (fd, TCSANOW, &SerialPortSettings) != 0)
         {
-                //printf("error %d from tcsetattr", errno);
+                printf("error %d from tcsetattr", errno);
                 return -1;
         }
         return 0;
@@ -244,9 +264,9 @@ int8_t *bptr, xch;
 /*****************************/
 void _ClosePort(void)
 {
-	pthread_cancel(InQueueID);	
-	pthread_mutex_destroy(&buf_mut);
-	pthread_mutex_destroy(&port_mut);
+	//pthread_cancel(InQueueID);	
+	//pthread_mutex_destroy(&buf_mut);
+	//pthread_mutex_destroy(&port_mut);
 	tcsetattr(fcom, TCSANOW, &old_tios);	//restore setting
 	close(fcom);
 	dwBaudrate = 0;
@@ -264,23 +284,85 @@ u_int32_t xi;
 int32_t iret;
 
 	//fcom = open("/dev/ttyUSB0", O_RDWR | O_NDELAY);
-fcom = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY | O_NDELAY);
+fcom = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);
 	if (fcom < 0) return 0;
-	tcgetattr(fcom, &old_tios);		//backup setting
+	//tcgetattr(fcom, &old_tios);		//backup setting
 //printf("open pass");
 	//Buffer pointer initial
-	wRxCounter =0 ;	
-	pWritePtr = &RxBuffer[0];
-	pReadPtr = &RxBuffer[0];
-	pRxBufferStart = &RxBuffer[0];
-	pRxBufferEnd = &RxBuffer[BUFFER_SIZE-1];
+	//wRxCounter =0 ;	
+	//pWritePtr = &RxBuffer[0];
+	//pReadPtr = &RxBuffer[0];
+	//pRxBufferStart = &RxBuffer[0];
+	//pRxBufferEnd = &RxBuffer[BUFFER_SIZE-1];
 	//hook receiver thread
-	fcom=1;
-	pthread_mutex_init(&port_mut, NULL);
-	pthread_mutex_init(&buf_mut, NULL);
+	//fcom=1;
+	//pthread_mutex_init(&port_mut, NULL);
+	//pthread_mutex_init(&buf_mut, NULL);
 	//pthread_create(&InQueueID, (pthread_attr_t*)(0), _IncomeInQueueThread, (void*)(0));
- 
-//	set_interface_attribs(fcom, B115200, 0); 
+
+	//set_interface_attribs(fcom, B115200, 0); 
+
+
+
+tcgetattr(fcom, &SerialPortSettings);
+
+        cfsetospeed (&SerialPortSettings, B115200);
+        cfsetispeed (&SerialPortSettings, B115200);
+		/* 8N1 Mode */
+		SerialPortSettings.c_cflag &= ~PARENB;   /* Disables the Parity Enable bit(PARENB),So No Parity   */
+		SerialPortSettings.c_cflag &= ~CSTOPB;   /* CSTOPB = 2 Stop bits,here it is cleared so 1 Stop bit */
+		SerialPortSettings.c_cflag &= ~CSIZE;	 /* Clears the mask for setting the data size             */
+		SerialPortSettings.c_cflag |=  CS8;      /* Set the data bits = 8                                 */
+		
+		SerialPortSettings.c_cflag &= ~CRTSCTS;       /* No Hardware flow Control                         */
+		SerialPortSettings.c_cflag |= CREAD | CLOCAL; /* Enable receiver,Ignore Modem Control lines       */ 
+		
+		
+		SerialPortSettings.c_iflag &= ~(IXON | IXOFF | IXANY);          /* Disable XON/XOFF flow control both i/p and o/p */
+		SerialPortSettings.c_iflag &= ~(ICANON | ECHO | ECHOE | ISIG);  /* Non Cannonical mode                            */
+
+		SerialPortSettings.c_oflag &= ~OPOST;/*No Output Processing*/
+       /* SerialPortSettings.c_cflag = (SerialPortSettings.c_cflag & ~CSIZE) | CS8;     // 8-bit chars
+        // disable IGNBRK for mismatched speed tests; otherwise receive break
+        // as \000 chars
+        //SerialPortSettings.c_iflag &= ~IGNBRK;         // disable break processing
+        //SerialPortSettings.c_lflag = 0;                // no signaling chars, no echo,
+                                        // no canonical processing
+        SerialPortSettings.c_oflag = 0;                // no remapping, no delays
+        SerialPortSettings.c_cc[VMIN]  = 0;            // read doesn't block
+        SerialPortSettings.c_cc[VTIME] = 0;            // 0.5 seconds read timeout
+
+        SerialPortSettings.c_iflag &= ~(IXON | IXOFF | IXANY); // shut off xon/xoff ctrl
+        SerialPortSettings.c_cflag |= (CLOCAL | CREAD);	// ignore modem controls,
+                                        	// enable reading
+        SerialPortSettings.c_cflag &= ~(PARENB | PARODD);      // shut off parity
+        SerialPortSettings.c_cflag |= parity;
+        SerialPortSettings.c_cflag &= ~CSTOPB;
+        SerialPortSettings.c_cflag &= ~CRTSCTS;*/
+printf("c flag = %X\n",SerialPortSettings.c_cflag);
+printf("i flag = %X\n",SerialPortSettings.c_iflag);
+printf("o flag = %X\n",SerialPortSettings.c_oflag);
+printf("l flag = %X\n",SerialPortSettings.c_lflag);
+        if (tcsetattr (fcom, TCSANOW, &SerialPortSettings) != 0)
+        {
+                printf("error %d from tcsetattr", errno);
+                return -1;
+        }
+
+
+
+
+
+ char *wrCmd = "I";
+
+int rcvCnt=0;
+	iResult = write(fcom,"I", 1);
+printf("SendCnt = %d, data=%x\n",iResult,*wrCmd);
+rcvCnt = read(fcom, rdData, 100);
+//for(int c=0;c<rcvCnt;c++)
+//{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[0]);
+//}
 		//not checking device when assign baudrate
 		//iret = _ReadBufferLength(rdData, 2);
 		//if ( rdData[0]==0x10 && rdData[1]==0x02 )iResult = 1;
@@ -320,20 +402,49 @@ return 0;
 	{printf("2\n");}
 	else if(strcmp("-identify",argv[1])==0)
 	{
-		printf("3\n");
 		iResult = _OpenPort(com_path);
-		sleep(2);
 		if(iResult == 1)
 		{
 		printf("open done\n");
 			iResult = _SendBufferLength(wrCmd,1);
-printf("Wait <enter>\n");
-rcvCnt = read(fcom, rdData, 100);
-printf("rcvCnt = %d",rcvCnt);
-getchar();
+
 			if(iResult == 1)
 			{printf("send success\n");
-
+rcvCnt = read(fcom, rdData, 100);
+for(int c=0;c<rcvCnt;c++)
+{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[c]);
+}
+rcvCnt = read(fcom, rdData, 100);
+for(int c=0;c<rcvCnt;c++)
+{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[c]);
+}
+rcvCnt = read(fcom, rdData, 100);
+for(int c=0;c<rcvCnt;c++)
+{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[c]);
+}
+rcvCnt = read(fcom, rdData, 100);
+for(int c=0;c<rcvCnt;c++)
+{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[c]);
+}
+rcvCnt = read(fcom, rdData, 100);
+for(int c=0;c<rcvCnt;c++)
+{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[c]);
+}
+rcvCnt = read(fcom, rdData, 100);
+for(int c=0;c<rcvCnt;c++)
+{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[c]);
+}
+rcvCnt = read(fcom, rdData, 100);
+for(int c=0;c<rcvCnt;c++)
+{
+printf("rcvCnt = %d, data=%c\n",rcvCnt,rdData[c]);
+}
 				//iResult = _ReadBufferLength(rdData, 20000);
 				//if ( iResult ) {
 				//		printf("receive data");
@@ -355,7 +466,7 @@ getchar();
 	{printf("7\n");}
 
 
-
+close(fcom);
 
 return 0;
 
