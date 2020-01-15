@@ -342,14 +342,14 @@ fcom = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY);
 /****************************************************************/
 void __printf_usage(char *argv0)
 {
-		printf("./AD4111_util -continue\n");
-		printf("./AD4111_util -single\n");
-		printf("./AD4111_util -identify\n");
-		printf("./AD4111_util -select [channel]\n");
-		printf("./AD4111_util -gain [channel] [value]\n");
-		printf("./AD4111_util -offset [channel] [value]\n");
-		printf("./AD4111_util -filter [mode] [speed]\n");
-		printf("./AD4111_util -save [channel]\n");
+		printf("./AD4111_util -identify				-->identify module type\n");
+		printf("./AD4111_util -select [channel]			-->select channel, channel 0~3\n");
+		printf("./AD4111_util -single				-->get data once from selected channel\n");
+		printf("./AD4111_util -continue				-->continue get data from selected channel\n");
+		printf("./AD4111_util -gain [channel] [value]		-->set calibration gain value, channel 0~3, value 3byte hex data\n");
+		printf("./AD4111_util -offset [channel] [value]		-->set calibration offset value, channel 0~3, value 3byte hex data\n");
+		printf("./AD4111_util -save [channel]			-->save channel claibration data into flash\n");
+		printf("./AD4111_util -filter [mode] [speed]		-->set filter mode[0/1] and sample per second level 0~7 \n");
 }
 /***************************************************************/
 int main(int argc, char **argv) 
@@ -362,21 +362,18 @@ int rcvCnt=0;
 int count=0;
 char* filter="0500";
 	if(argc<2)
-	{
-		printf("./AD4111_util -continue\n");
-		printf("./AD4111_util -single\n");
-		printf("./AD4111_util -identify\n");
-		printf("./AD4111_util -select [channel]\n");
-		printf("./AD4111_util -gain [channel] [value]\n");
-		printf("./AD4111_util -offset [channel] [value]\n");
-		printf("./AD4111_util -filter [mode] [speed]\n");
-		printf("./AD4111_util -save [channel]\n");
-
+	{		
+		printf("./AD4111_util -identify				-->identify module type\n");
+		printf("./AD4111_util -select [channel]			-->select channel, channel 0~3\n");
+		printf("./AD4111_util -single				-->get data once from selected channel\n");
+		printf("./AD4111_util -continue				-->continue get data from selected channel\n");
+		printf("./AD4111_util -gain [channel] [value]		-->set calibration gain value, channel 0~3, value 3byte hex data\n");
+		printf("./AD4111_util -offset [channel] [value]		-->set calibration offset value, channel 0~3, value 3byte hex data\n");
+		printf("./AD4111_util -save [channel]			-->save channel claibration data into flash\n");
+		printf("./AD4111_util -filter [mode] [speed]		-->set filter mode[0/1] and sample per second level 0~7 \n");
 		return 0;
 	}
-	//iResult = _OpenPort(com_path);
-	//if(iResult == 1)
-	//{
+
 		if(strcmp("-continue",argv[1])==0)
 		{
 			iResult = _OpenPort(com_path);
