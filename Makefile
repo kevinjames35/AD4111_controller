@@ -1,5 +1,5 @@
 #simple make file
 all:
-	gcc AD111_util.c -o AD4111CON -lpthread
+	gcc AD4111_util.c -o AD4111_util -lpthread
 clean:
-	rm -f AD4111CON
+	rm -f AD4111_util
